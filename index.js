@@ -83,12 +83,9 @@ bot.on('text', async (ctx) => {
                 
             const featuredImageId = mediaUpload.id;
 
-            const imageHtml = `<figure class="wp-block-image size-large"><img src="${mediaUpload.source_url}" alt="${title}" style="max-width: 100%; height: auto;" /></figure>\n\n`;
-            const contentWithImage = imageHtml + content;
-
             const newPost = await wp.posts().create({
-                title: title,
-                content: contentWithImage,
+                title,
+                content: content,
                 status: 'publish',
                 featured_media: featuredImageId,
                 categories: [29]
