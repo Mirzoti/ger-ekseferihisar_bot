@@ -90,7 +90,8 @@ bot.on('text', async (ctx) => {
                 title: title,
                 content: contentWithImage,
                 status: 'publish',
-                featured_media: featuredImageId
+                featured_media: featuredImageId,
+                categories: [29]
             });
 
             ctx.reply(`🎉 Haber başarıyla yayınlandı!\n\n🔗 Link: ${newPost.link}`);
