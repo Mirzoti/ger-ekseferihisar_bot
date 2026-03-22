@@ -88,7 +88,10 @@ bot.on('text', async (ctx) => {
                 content: content,
                 status: 'publish',
                 featured_media: featuredImageId,
-                categories: [29]
+                categories: [29],
+                meta: {
+                    '_esn_numarali_surmanset': 'on'
+                }
             });
 
             ctx.reply(`🎉 Haber başarıyla yayınlandı!\n\n🔗 Link: ${newPost.link}`);
