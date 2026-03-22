@@ -3,6 +3,7 @@ const { Telegraf } = require('telegraf');
 const WPAPI = require('wpapi');
 const axios = require('axios');
 const express = require('express');
+const { GoogleGenAI } = require('@google/genai');
 
 const {
     BOT_TOKEN,
@@ -83,12 +84,55 @@ bot.on('text', async (ctx) => {
                 
             const featuredImageId = mediaUpload.id;
 
+            let generatedTags = [];
+            if (process.env.GEMINI_API_KEY) {
+                try {
+                    ctx.reply("🤖 Metin okunuyor, yapay zeka SEO etiketlerini üretiyor...");
+                    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                    const prompt = `Sen profesyonel bir gazeteci ve SEO uzmanısın. Aşağıdaki haber metninden, Google aramalarında en çok tıklanmayı sağlayacak, konuyu en iyi özetleyen 5 anahtar kelimeyi (etiketi) çıkar.
+                    Kurallar:
+                    1. Sadece kelimelerin arasına virgül koy. (Örn: Haber, Ekonomi, İzmir, Yatırım, Proje)
+                    2. Başka tek bir cümle bile yazma. Madde imi, sayı, giriş cümlesi vs. KESİNLİKLE OLMASIN.
+                    3. Her kelimenin ilk harfi mutlaka büyük olsun.
+                    
+                    Haber Başlığı: ${title}
+                    Haber Metni: ${content}`;
+
+                    const response = await ai.models.generateContent({
+                        model: 'gemini-2.5-flash',
+                        contents: prompt
+                    });
+
+                    const aiTags = response.text.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                    ctx.reply(`🧠 Yapay zekanın bulduğu SEO etiketleri: ${aiTags.join(', ')}\nSisteme entegre ediliyor...`);
+
+                    // Etiketlerin WP ID'lerini bul ya da yeni olustur
+                    for (const tag of aiTags) {
+                        try {
+                            const searchRes = await wp.tags().param('search', tag);
+                            if (searchRes && searchRes.length > 0) {
+                                generatedTags.push(searchRes[0].id);
+                            } else {
+                                const created = await wp.tags().create({ name: tag });
+                                generatedTags.push(created.id);
+                            }
+                        } catch (e) {
+                            // hatali ve benzer etiketleri ustelemeden gec
+                        }
+                    }
+                } catch (aiErr) {
+                    console.error("Yapay Zeka Hatasi:", aiErr);
+                    ctx.reply("⚠️ Yapay zeka sunucusuna erisilirken hata alindi. Habere etiketsiz devam ediliyor...");
+                }
+            }
+
             const newPost = await wp.posts().create({
                 title,
                 content: content,
                 status: 'publish',
                 featured_media: featuredImageId,
                 categories: [1, 2],
+                tags: generatedTags,
                 meta: {
                     '_esn_numarali_surmanset': 'on'
                 }
