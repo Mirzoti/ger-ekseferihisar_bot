@@ -88,7 +88,7 @@ bot.on('text', async (ctx) => {
                 content: content,
                 status: 'publish',
                 featured_media: featuredImageId,
-                categories: [29],
+                categories: [1, 2],
                 meta: {
                     '_esn_numarali_surmanset': 'on'
                 }
