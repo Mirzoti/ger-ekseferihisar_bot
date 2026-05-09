@@ -42,16 +42,100 @@ bot.on('photo', async (ctx) => {
         const highestResPhoto = photoArray[photoArray.length - 1];
         const fileLink = await ctx.telegram.getFileLink(highestResPhoto.file_id);
         
-        userStates[chatId] = {
-            step: 'WAITING_FOR_TEXT',
-            photoUrl: fileLink.href
-        };
+        if (!userStates[chatId] || userStates[chatId].step === 'WAITING_FOR_TEXT') {
+            userStates[chatId] = { photos: [], step: 'COLLECTING_PHOTOS' };
+        }
         
-        ctx.reply('✅ Fotoğrafı aldım! Şimdi lütfen haber atın.\n\n*(Not: Attığınız mesajın ilk satırı "Başlık", alt satırları ise "Haber Uzun Metni" olarak algılanacaktır)*');
+        userStates[chatId].photos.push(fileLink.href);
+
+        if (userStates[chatId].photoTimeout) {
+            clearTimeout(userStates[chatId].photoTimeout);
+        }
+
+        userStates[chatId].photoTimeout = setTimeout(() => {
+            const photos = userStates[chatId].photos;
+            const buttons = photos.map((p, index) => {
+                return { text: `${index + 1}`, callback_data: `select_main_${index}` };
+            });
+
+            ctx.reply(`📸 Toplam ${photos.length} adet fotoğraf alındı.\nLütfen afiş (ana görsel) olacak fotoğrafı seçin:`, {
+                reply_markup: {
+                    inline_keyboard: [buttons]
+                }
+            });
+            
+            userStates[chatId].step = 'SELECTING_MAIN_PHOTO';
+        }, 2500);
+
     } catch (error) {
         console.error('Fotoğraf kaydedilirken hata:', error);
         ctx.reply('❌ Fotoğraf alınırken bir hata oluştu. Lütfen tekrar gönderin.');
     }
+});
+
+bot.action(/select_main_(\d+)/, async (ctx) => {
+    const chatId = ctx.chat.id;
+    const userState = userStates[chatId];
+
+    if (!userState || userState.step !== 'SELECTING_MAIN_PHOTO') {
+        return ctx.answerCbQuery('Bu işlem şu an geçerli değil.', { show_alert: true });
+    }
+
+    const selectedIndex = parseInt(ctx.match[1]);
+    userState.selectedIndex = selectedIndex;
+
+    await ctx.answerCbQuery();
+
+    await ctx.replyWithPhoto({ url: userState.photos[selectedIndex] }, {
+        caption: `Seçtiğiniz ${selectedIndex + 1}. fotoğraf bu. Onaylıyor musunuz?`,
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '✅ Evet', callback_data: 'confirm_main_yes' },
+                    { text: '❌ Hayır', callback_data: 'confirm_main_no' }
+                ]
+            ]
+        }
+    });
+});
+
+bot.action('confirm_main_yes', async (ctx) => {
+    const chatId = ctx.chat.id;
+    const userState = userStates[chatId];
+
+    if (!userState || userState.step !== 'SELECTING_MAIN_PHOTO') {
+        return ctx.answerCbQuery('Bu işlem şu an geçerli değil.', { show_alert: true });
+    }
+
+    userState.step = 'WAITING_FOR_TEXT';
+    await ctx.answerCbQuery('Onaylandı');
+    
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+
+    await ctx.reply('✅ Ana görsel onaylandı!\n\nŞimdi lütfen haber metnini gönderin.\n*(Not: İlk satır "Başlık", alt satırlar "İçerik" olarak algılanacaktır)*');
+});
+
+bot.action('confirm_main_no', async (ctx) => {
+    const chatId = ctx.chat.id;
+    const userState = userStates[chatId];
+
+    if (!userState || userState.step !== 'SELECTING_MAIN_PHOTO') {
+        return ctx.answerCbQuery('Bu işlem şu an geçerli değil.', { show_alert: true });
+    }
+
+    await ctx.answerCbQuery('İptal edildi');
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+
+    const photos = userState.photos;
+    const buttons = photos.map((p, index) => {
+        return { text: `${index + 1}`, callback_data: `select_main_${index}` };
+    });
+
+    await ctx.reply('Lütfen tekrar afiş (ana görsel) olacak fotoğrafı seçin:', {
+        reply_markup: {
+            inline_keyboard: [buttons]
+        }
+    });
 });
 
 bot.on('text', async (ctx) => {
@@ -71,18 +155,53 @@ bot.on('text', async (ctx) => {
         ctx.reply('⏳ Fotoğraf medya kütüphanesine yükleniyor ve haberiniz yayınlanıyor. Lütfen bekleyin...');
 
         try {
-            const imageResponse = await axios.get(userState.photoUrl, { responseType: 'arraybuffer' });
-            const imageBuffer = Buffer.from(imageResponse.data, 'binary');
-            
-            const fileName = `haber_foto_${Date.now()}.jpg`;
-            const mediaUpload = await wp.media()
-                .file(imageBuffer, fileName)
-                .create({
-                    title: title + ' - Öne Çıkan Görsel',
-                    alt_text: title
-                });
+            const wpMediaUrls = [];
+            const wpMediaIds = [];
+            let featuredImageId = null;
+
+            for (let i = 0; i < userState.photos.length; i++) {
+                const photoUrl = userState.photos[i];
+                const imageResponse = await axios.get(photoUrl, { responseType: 'arraybuffer' });
+                const imageBuffer = Buffer.from(imageResponse.data, 'binary');
                 
-            const featuredImageId = mediaUpload.id;
+                const isMain = (i === userState.selectedIndex);
+                const fileName = isMain ? `haber_afis_${Date.now()}.jpg` : `haber_foto_${i}_${Date.now()}.jpg`;
+                
+                const mediaUpload = await wp.media()
+                    .file(imageBuffer, fileName)
+                    .create({
+                        title: title + (isMain ? ' - Öne Çıkan Görsel' : ` - Görsel ${i+1}`),
+                        alt_text: title
+                    });
+                
+                if (isMain) {
+                    featuredImageId = mediaUpload.id;
+                } else {
+                    wpMediaUrls.push(mediaUpload.source_url);
+                    wpMediaIds.push(mediaUpload.id);
+                }
+            }
+
+            // Metin ici görselleri dagit
+            let finalHtmlContent = "";
+            let paragraphArray = content.split('\n\n').filter(p => p.trim() !== '');
+            let currentImageIndex = 0;
+
+            for (let i = 0; i < paragraphArray.length; i++) {
+                finalHtmlContent += paragraphArray[i] + "\n\n";
+
+                // Her 2 paragrafta 1 fotoğraf (0-indexed oldugu icin i % 2 === 1)
+                if (i % 2 === 1 && currentImageIndex < wpMediaUrls.length) {
+                    finalHtmlContent += `<!-- wp:image {"id":${wpMediaIds[currentImageIndex]},"sizeSlug":"large"} -->\n<figure class="wp-block-image size-large"><img src="${wpMediaUrls[currentImageIndex]}" alt="${title}" class="wp-image-${wpMediaIds[currentImageIndex]}"/></figure>\n<!-- /wp:image -->\n\n`;
+                    currentImageIndex++;
+                }
+            }
+
+            // Artan fotograflari en sona ekle
+            while (currentImageIndex < wpMediaUrls.length) {
+                finalHtmlContent += `<!-- wp:image {"id":${wpMediaIds[currentImageIndex]},"sizeSlug":"large"} -->\n<figure class="wp-block-image size-large"><img src="${wpMediaUrls[currentImageIndex]}" alt="${title}" class="wp-image-${wpMediaIds[currentImageIndex]}"/></figure>\n<!-- /wp:image -->\n\n`;
+                currentImageIndex++;
+            }
 
             let generatedTags = [];
             if (process.env.GEMINI_API_KEY) {
@@ -128,7 +247,7 @@ bot.on('text', async (ctx) => {
 
             const newPost = await wp.posts().create({
                 title,
-                content: content,
+                content: finalHtmlContent,
                 status: 'publish',
                 featured_media: featuredImageId,
                 categories: [1, 2],
