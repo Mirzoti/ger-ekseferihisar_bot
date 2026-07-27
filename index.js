@@ -274,12 +274,23 @@ bot.on('text', async (ctx) => {
                     Haber Başlığı: ${title}
                     Haber Metni: ${content}`;
 
-                    const response = await ai.models.generateContent({
-                        model: 'gemini-2.5-flash',
-                        contents: prompt
-                    });
+                    let responseText = '';
+                    try {
+                        const response = await ai.models.generateContent({
+                            model: 'gemini-2.0-flash',
+                            contents: prompt
+                        });
+                        responseText = response.text;
+                    } catch (e1) {
+                        console.warn('gemini-2.0-flash başarısız, gemini-1.5-flash deneniyor...', e1.message);
+                        const response = await ai.models.generateContent({
+                            model: 'gemini-1.5-flash',
+                            contents: prompt
+                        });
+                        responseText = response.text;
+                    }
 
-                    const aiTags = response.text.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                    const aiTags = responseText.split(',').map(t => t.trim()).filter(t => t.length > 0);
                     ctx.reply(`🧠 Yapay zekanın bulduğu SEO etiketleri: ${aiTags.join(', ')}\nSisteme entegre ediliyor...`);
 
                     for (const tag of aiTags) {
@@ -291,9 +302,11 @@ bot.on('text', async (ctx) => {
                         }
                     }
                 } catch (aiErr) {
-                    console.error('Yapay Zeka Hatası:', aiErr);
-                    ctx.reply('⚠️ Yapay zeka sunucusuna erişilirken hata alındı. Habere etiketsiz devam ediliyor...');
+                    console.error('Yapay Zeka Hatası:', aiErr.message || aiErr);
+                    ctx.reply(`⚠️ Yapay zeka sunucusuna erişilirken hata alındı (${aiErr.message || 'Bilinmeyen Hata'}). Habere etiketsiz devam ediliyor...`);
                 }
+            } else {
+                console.log("GEMINI_API_KEY tanımlı değil, yapay zeka SEO etiket üretimi atlandı.");
             }
 
             const newPost = await wpCreatePost({
