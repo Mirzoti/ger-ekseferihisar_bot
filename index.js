@@ -52,6 +52,46 @@ async function wpUploadMedia(buffer, fileName, title, altText, retries = 3) {
     }
 }
 
+// 100% Ücretsiz ve API Key Gerektirmeyen SEO Etiket Üretici (AI + Yerel Algoritma)
+async function generateSEOTags(title, content) {
+    // 1. Önce tamamen ücretsiz Pollinations AI ile dene (API key istemez)
+    try {
+        const prompt = `Aşağıdaki haber metninden 5 adet SEO anahtar kelimesi/etiketi çıkar. Sadece kelimelerin arasına virgül koy. Örnek: İzmir, Seferihisar, Ekonomi, Belediye, Proje. Başka hiçbir açıklama yazma.\n\nBaşlık: ${title}\nMetin: ${content}`;
+        const res = await axios.post('https://text.pollinations.ai/', {
+            messages: [{ role: 'user', content: prompt }],
+            model: 'openai'
+        }, { timeout: 10000 });
+
+        const raw = typeof res.data === 'string' ? res.data : (res.data?.choices?.[0]?.message?.content || '');
+        const tags = raw.split(',').map(t => t.trim().replace(/[^a-zA-Z0-9çğıöşüÇĞİÖSHÜ ]/g, '')).filter(t => t.length >= 3);
+        if (tags.length >= 3) {
+            return tags.slice(0, 5).map(t => t.charAt(0).toUpperCase() + t.slice(1));
+        }
+    } catch (e) {
+        console.warn('Pollinations AI atlandı, yerel algoritmaya geçiliyor:', e.message);
+    }
+
+    // 2. Yedek: Yerel Akıllı Kelime Analizi (Asla hata vermez, API key istemez)
+    const stopWords = new Set(['bir', 'bu', 've', 'ile', 'için', 'de', 'da', 'ki', 'daha', 'çok', 'gibi', 'kadar', 'sonra', 'önce', 'olan', 'olarak', 'tarafından', 'etti', 'dedi', 'yaptı', 'şeklinde', 'üzerine', 'ayrıca', 'ancak', 'veya', 'göre', 'bulunan']);
+    const words = `${title} ${title} ${content}`.replace(/[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ ]/g, ' ').split(/\s+/);
+    const wordFreq = {};
+
+    for (let word of words) {
+        word = word.trim();
+        if (word.length < 4) continue;
+        const lower = word.toLowerCase();
+        if (stopWords.has(lower)) continue;
+        const capitalized = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        wordFreq[capitalized] = (wordFreq[capitalized] || 0) + 1;
+    }
+
+    const sorted = Object.keys(wordFreq).sort((a, b) => wordFreq[b] - wordFreq[a]);
+    const fallbackTags = sorted.slice(0, 5);
+    if (!fallbackTags.map(t => t.toLowerCase()).includes('izmir')) fallbackTags.unshift('İzmir');
+    if (!fallbackTags.map(t => t.toLowerCase()).includes('seferihisar')) fallbackTags.push('Seferihisar');
+    return fallbackTags.slice(0, 5);
+}
+
 // Etiket ara veya oluştur
 async function wpGetOrCreateTag(name) {
     const search = await wpAxios.get('/tags', { params: { search: name } });
@@ -259,54 +299,23 @@ bot.on('text', async (ctx) => {
                 currentImageIndex++;
             }
 
-            // SEO Etiketleri
+            // SEO Etiketleri (Tamamen Ücretsiz AI + Yerel Algoritma)
             let generatedTagIds = [];
-            if (process.env.GEMINI_API_KEY) {
-                try {
-                    ctx.reply('🤖 Metin okunuyor, yapay zeka SEO etiketlerini üretiyor...');
-                    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-                    const prompt = `Sen profesyonel bir gazeteci ve SEO uzmanısın. Aşağıdaki haber metninden, Google aramalarında en çok tıklanmayı sağlayacak, konuyu en iyi özetleyen 5 anahtar kelimeyi (etiketi) çıkar.
-                    Kurallar:
-                    1. Sadece kelimelerin arasına virgül koy. (Örn: Haber, Ekonomi, İzmir, Yatırım, Proje)
-                    2. Başka tek bir cümle bile yazma. Madde imi, sayı, giriş cümlesi vs. KESİNLİKLE OLMASIN.
-                    3. Her kelimenin ilk harfi mutlaka büyük olsun.
+            try {
+                ctx.reply('🤖 SEO etiketleri ücretsiz yapay zeka ile oluşturuluyor...');
+                const aiTags = await generateSEOTags(title, content);
+                ctx.reply(`🧠 Oluşturulan SEO etiketleri: ${aiTags.join(', ')}\nSisteme entegre ediliyor...`);
 
-                    Haber Başlığı: ${title}
-                    Haber Metni: ${content}`;
-
-                    let responseText = '';
+                for (const tag of aiTags) {
                     try {
-                        const response = await ai.models.generateContent({
-                            model: 'gemini-2.0-flash',
-                            contents: prompt
-                        });
-                        responseText = response.text;
-                    } catch (e1) {
-                        console.warn('gemini-2.0-flash başarısız, gemini-1.5-flash deneniyor...', e1.message);
-                        const response = await ai.models.generateContent({
-                            model: 'gemini-1.5-flash',
-                            contents: prompt
-                        });
-                        responseText = response.text;
+                        const tagId = await wpGetOrCreateTag(tag);
+                        generatedTagIds.push(tagId);
+                    } catch (e) {
+                        console.warn(`[TAG] "${tag}" etiketi eklenemedi:`, e.message);
                     }
-
-                    const aiTags = responseText.split(',').map(t => t.trim()).filter(t => t.length > 0);
-                    ctx.reply(`🧠 Yapay zekanın bulduğu SEO etiketleri: ${aiTags.join(', ')}\nSisteme entegre ediliyor...`);
-
-                    for (const tag of aiTags) {
-                        try {
-                            const tagId = await wpGetOrCreateTag(tag);
-                            generatedTagIds.push(tagId);
-                        } catch (e) {
-                            console.warn(`[TAG] "${tag}" etiketi atlanamadı:`, e.message);
-                        }
-                    }
-                } catch (aiErr) {
-                    console.error('Yapay Zeka Hatası:', aiErr.message || aiErr);
-                    ctx.reply(`⚠️ Yapay zeka sunucusuna erişilirken hata alındı (${aiErr.message || 'Bilinmeyen Hata'}). Habere etiketsiz devam ediliyor...`);
                 }
-            } else {
-                console.log("GEMINI_API_KEY tanımlı değil, yapay zeka SEO etiket üretimi atlandı.");
+            } catch (tagErr) {
+                console.error('Etiket Hatası:', tagErr.message);
             }
 
             const newPost = await wpCreatePost({
