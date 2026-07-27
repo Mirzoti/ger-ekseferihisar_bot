@@ -1,0 +1,18 @@
+{
+  "name": "gercek-seferihisar-bot",
+  "version": "1.0.0",
+  "description": "Ikinci site icin bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.46.0",
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "form-data": "^4.0.6",
+    "telegraf": "^4.16.3",
+    "wpapi": "^1.2.2"
+  }
+}
