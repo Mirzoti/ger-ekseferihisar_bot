@@ -124,8 +124,8 @@ bot.use((ctx, next) => {
     console.log(`Yetkisiz erişim denemesi tespit edildi. ID: ${ctx.chat?.id}`);
 });
 
-bot.start((ctx) => {
-    ctx.reply('👋 Merhaba! Gerçek Seferhisar Haber Botu aktif.\nLütfen önce haberde kullanmak istediğiniz **fotoğrafı** gönderin.');
+bot.start(async (ctx) => {
+    await ctx.reply('👋 Merhaba! Gerçek Seferhisar Haber Botu aktif.\nLütfen önce haberde kullanmak istediğiniz **fotoğrafı** gönderin.');
 });
 
 bot.on('photo', async (ctx) => {
@@ -145,13 +145,13 @@ bot.on('photo', async (ctx) => {
             clearTimeout(userStates[chatId].photoTimeout);
         }
 
-        userStates[chatId].photoTimeout = setTimeout(() => {
+        userStates[chatId].photoTimeout = setTimeout(async () => {
             const photos = userStates[chatId].photos;
             const buttons = photos.map((p, index) => {
                 return { text: `${index + 1}`, callback_data: `select_main_${index}` };
             });
 
-            ctx.reply(`📸 Toplam ${photos.length} adet fotoğraf alındı.\nLütfen afiş (ana görsel) olacak fotoğrafı seçin:`, {
+            await ctx.reply(`📸 Toplam ${photos.length} adet fotoğraf alındı.\nLütfen afiş (ana görsel) olacak fotoğrafı seçin:`, {
                 reply_markup: {
                     inline_keyboard: [buttons]
                 }
@@ -162,7 +162,7 @@ bot.on('photo', async (ctx) => {
 
     } catch (error) {
         console.error('Fotoğraf kaydedilirken hata:', error);
-        ctx.reply('❌ Fotoğraf alınırken bir hata oluştu. Lütfen tekrar gönderin.');
+        await ctx.reply('❌ Fotoğraf alınırken bir hata oluştu. Lütfen tekrar gönderin.');
     }
 });
 
@@ -242,10 +242,10 @@ bot.on('text', async (ctx) => {
         const content = lines.slice(1).join('\n').trim();
         
         if (!title || !content) {
-            return ctx.reply('⚠️ Lütfen mesajınızı kontrol edin. En az 2 satır olmalı (1. Satır: Başlık, Diğerleri: İçerik).');
+            return await ctx.reply('⚠️ Lütfen mesajınızı kontrol edin. En az 2 satır olmalı (1. Satır: Başlık, Diğerleri: İçerik).');
         }
 
-        ctx.reply('⏳ Fotoğraf medya kütüphanesine yükleniyor ve haberiniz yayınlanıyor. Lütfen bekleyin...');
+        await ctx.reply('⏳ Fotoğraf medya kütüphanesine yükleniyor ve haberiniz yayınlanıyor. Lütfen bekleyin...');
 
         try {
             const wpMediaUrls = [];
@@ -254,7 +254,7 @@ bot.on('text', async (ctx) => {
 
             for (let i = 0; i < userState.photos.length; i++) {
                 const photoUrl = userState.photos[i];
-                ctx.reply(`📥 Fotoğraf ${i + 1}/${userState.photos.length} indiriliyor ve WordPress'e yükleniyor...`);
+                await ctx.reply(`📥 Fotoğraf ${i + 1}/${userState.photos.length} indiriliyor ve WordPress'e yükleniyor...`);
 
                 // Görseli indir
                 const imageResponse = await axios.get(photoUrl, {
@@ -302,9 +302,9 @@ bot.on('text', async (ctx) => {
             // SEO Etiketleri (Tamamen Ücretsiz AI + Yerel Algoritma)
             let generatedTagIds = [];
             try {
-                ctx.reply('🤖 SEO etiketleri ücretsiz yapay zeka ile oluşturuluyor...');
+                await ctx.reply('🤖 SEO etiketleri ücretsiz yapay zeka ile oluşturuluyor...');
                 const aiTags = await generateSEOTags(title, content);
-                ctx.reply(`🧠 Oluşturulan SEO etiketleri: ${aiTags.join(', ')}\nSisteme entegre ediliyor...`);
+                await ctx.reply(`🧠 Oluşturulan SEO etiketleri: ${aiTags.join(', ')}\nSisteme entegre ediliyor...`);
 
                 for (const tag of aiTags) {
                     try {
@@ -325,20 +325,26 @@ bot.on('text', async (ctx) => {
                 tagIds: generatedTagIds,
             });
 
-            ctx.reply(`🎉 Haber başarıyla yayınlandı!\n\n🔗 Link: ${newPost.link}`);
+            await ctx.reply(`🎉 Haber başarıyla yayınlandı!\n\n🔗 Link: ${newPost.link}`);
             delete userStates[chatId];
 
         } catch (error) {
             console.error('WP Yükleme Hatası:', error.response?.data || error.message);
-            ctx.reply(`❌ İçerik WordPress'e yüklenirken hata oluştu!\nHata detayı: ${error.response?.data?.message || error.message || 'Bilinmeyen Hata'}`);
+            await ctx.reply(`❌ İçerik WordPress'e yüklenirken hata oluştu!\nHata detayı: ${error.response?.data?.message || error.message || 'Bilinmeyen Hata'}`);
         }
     } else {
-        ctx.reply('⚠️ Haber yayınlamak için önce bana bir **fotoğraf** göndermeniz gerekiyor.');
+        await ctx.reply('⚠️ Haber yayınlamak için önce bana bir **fotoğraf** göndermeniz gerekiyor.');
     }
 });
 
+bot.catch((err, ctx) => {
+    console.error('Oooops, encountered an error for', ctx.updateType, err);
+});
+
 bot.launch().then(() => {
-    console.log('🤖 Haber Botu başarıyla çalıştırıldı ve mesaj bekliyor...');
+    console.log('Haber Botu basariyla calistirildi ve mesaj bekliyor...');
+}).catch(err => {
+    console.error('Bot launch error:', err);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
@@ -353,3 +359,8 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🌐 Render Web Servisi ${PORT} portunda dinleniyor...`);
 });
+
+
+
+
+
