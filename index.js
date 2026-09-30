@@ -16,8 +16,8 @@ const {
 const bot = new Telegraf(BOT_TOKEN);
 
 // WordPress REST API yardımcı fonksiyonları (WPAPI yerine axios ile — TLS sorunu çözümü)
-const WP_AUTH = Buffer.from(`${WP_USERNAME}:${WP_APP_PASSWORD}`).toString('base64');
-const WP_BASE = WP_ENDPOINT.replace(/\/wp-json\/?$/, '') + '/wp-json/wp/v2';
+const WP_AUTH = Buffer.from(`${WP_USERNAME || ''}:${WP_APP_PASSWORD || ''}`).toString('base64');
+const WP_BASE = (WP_ENDPOINT || '').replace(/\/wp-json\/?$/, '') + '/wp-json/wp/v2';
 
 const wpAxios = axios.create({
     baseURL: WP_BASE,
@@ -114,7 +114,7 @@ async function wpCreatePost({ title, content, featuredMediaId, tagIds }) {
     return res.data; // { id, link, ... }
 }
 
-const allowedChatIds = AUTHORIZED_CHAT_ID.split(',').map(id => parseInt(id.trim(), 10));
+const allowedChatIds = (AUTHORIZED_CHAT_ID || '').split(',').map(id => parseInt(id.trim(), 10));
 const userStates = {};
 
 bot.use((ctx, next) => {
@@ -146,18 +146,27 @@ bot.on('photo', async (ctx) => {
         }
 
         userStates[chatId].photoTimeout = setTimeout(async () => {
-            const photos = userStates[chatId].photos;
-            const buttons = photos.map((p, index) => {
-                return { text: `${index + 1}`, callback_data: `select_main_${index}` };
-            });
-
-            await ctx.reply(`📸 Toplam ${photos.length} adet fotoğraf alındı.\nLütfen afiş (ana görsel) olacak fotoğrafı seçin:`, {
-                reply_markup: {
-                    inline_keyboard: [buttons]
+            try {
+                const photos = userStates[chatId].photos;
+                const buttons = [];
+                for (let i = 0; i < photos.length; i += 5) {
+                    const row = photos.slice(i, i + 5).map((p, index) => {
+                        return { text: `${i + index + 1}`, callback_data: `select_main_${i + index}` };
+                    });
+                    buttons.push(row);
                 }
-            });
-            
-            userStates[chatId].step = 'SELECTING_MAIN_PHOTO';
+
+                await ctx.reply(`📸 Toplam ${photos.length} adet fotoğraf alındı.\nLütfen afiş (ana görsel) olacak fotoğrafı seçin:`, {
+                    reply_markup: {
+                        inline_keyboard: buttons
+                    }
+                });
+                
+                userStates[chatId].step = 'SELECTING_MAIN_PHOTO';
+            } catch (err) {
+                console.error('Fotoğraf seçimi menüsü gönderilirken hata:', err);
+                await ctx.reply('❌ Fotoğraflar işlenirken bir hata oluştu, lütfen tekrar deneyin.').catch(() => {});
+            }
         }, 2500);
 
     } catch (error) {
@@ -220,13 +229,17 @@ bot.action('confirm_main_no', async (ctx) => {
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
 
     const photos = userState.photos;
-    const buttons = photos.map((p, index) => {
-        return { text: `${index + 1}`, callback_data: `select_main_${index}` };
-    });
+    const buttons = [];
+    for (let i = 0; i < photos.length; i += 5) {
+        const row = photos.slice(i, i + 5).map((p, index) => {
+            return { text: `${i + index + 1}`, callback_data: `select_main_${i + index}` };
+        });
+        buttons.push(row);
+    }
 
     await ctx.reply('Lütfen tekrar afiş (ana görsel) olacak fotoğrafı seçin:', {
         reply_markup: {
-            inline_keyboard: [buttons]
+            inline_keyboard: buttons
         }
     });
 });
@@ -341,11 +354,8 @@ bot.catch((err, ctx) => {
     console.error('Oooops, encountered an error for', ctx.updateType, err);
 });
 
-bot.launch().then(() => {
-    console.log('Haber Botu basariyla calistirildi ve mesaj bekliyor...');
-}).catch(err => {
-    console.error('Bot launch error:', err);
-});
+bot.launch().catch(err => { console.error('Bot launch error:', err); });
+console.log('Haber Botu basariyla calistirildi ve mesaj bekliyor...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
